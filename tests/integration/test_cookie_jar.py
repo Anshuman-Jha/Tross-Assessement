@@ -31,13 +31,13 @@ def test_session_accumulates_cookies_linkedin_sets() -> None:
     assert "bcookie=v=2&abc" in header
 
 
-def test_absorbing_never_overwrites_the_configured_li_at() -> None:
-    """LinkedIn echoes li_at back; the operator's value stays authoritative."""
+def test_absorbing_other_cookies_leaves_li_at_alone() -> None:
+    """Unrelated Set-Cookie traffic must not disturb the credential."""
     s = LinkedInSession(li_at="operator-token", jsessionid="ajax:1")
-    s.absorb({"li_at": "some-other-value", "lidc": "b=VB1:x"})
+    s.absorb({"lidc": "b=VB1:x", "bcookie": "v=2&abc"})
 
     assert "li_at=operator-token" in s.cookie_header()
-    assert "some-other-value" not in s.cookie_header()
+    assert s.rotations == 0
 
 
 def test_jsessionid_from_set_cookie_updates_the_csrf_token() -> None:
@@ -148,3 +148,41 @@ async def test_li_at_survives_a_redirect_chain(client) -> None:
     for i, call in enumerate(respx.calls, start=1):
         cookie = call.request.headers.get("cookie", "")
         assert "li_at=test-li-at" in cookie, f"hop {i} went out without li_at: {cookie!r}"
+
+
+def test_a_rotated_li_at_is_adopted() -> None:
+    """LinkedIn refreshes li_at periodically; the new value must be kept.
+
+    A browser stores whatever `Set-Cookie: li_at=...` it is handed. A client
+    that keeps replaying the originally-configured value drifts out of sync
+    with LinkedIn's view of the session, which is one way a session that
+    started healthy stops working after a few minutes.
+    """
+    s = LinkedInSession(li_at="original-token", jsessionid="ajax:1")
+    s.absorb({"li_at": "rotated-token"})
+
+    assert s.li_at == "rotated-token"
+    assert "li_at=rotated-token" in s.cookie_header()
+    assert s.rotations == 1
+
+
+def test_a_cleared_li_at_is_not_adopted_as_a_value() -> None:
+    """Expiring the cookie is a rejection, not a rotation.
+
+    LinkedIn invalidates a session by sending li_at with a 1970 expiry. That
+    must never be stored as the new credential — the client would then send a
+    deletion sentinel as its token on every subsequent request.
+    """
+    s = LinkedInSession(li_at="original-token", jsessionid="ajax:1")
+    s.absorb({"li_at": ""})
+    assert s.li_at == "original-token"
+
+    s.absorb({"li_at": "delete"})
+    assert s.li_at == "original-token", "'delete' is a tombstone, not a token"
+
+
+def test_rotation_ignores_values_that_are_not_credentials() -> None:
+    s = LinkedInSession(li_at="original-token", jsessionid="ajax:1")
+    for junk in ("", "   ", "delete", "deleted", "null"):
+        s.absorb({"li_at": junk})
+    assert s.li_at == "original-token"

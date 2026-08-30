@@ -19,6 +19,11 @@ from app.observability.logging import get_logger
 logger = get_logger(__name__)
 
 
+#: Values LinkedIn sends when *clearing* a cookie rather than setting one.
+#: Storing any of these would leave the client authenticating with a tombstone.
+_COOKIE_TOMBSTONES = frozenset({"delete", "deleted", "null", "none", "-"})
+
+
 class SessionState(StrEnum):
     HEALTHY = "healthy"
     #: Temporarily rested after a rate limit; returns to healthy automatically.
@@ -46,6 +51,8 @@ class LinkedInSession:
     cooldown_until: float = 0.0
     last_used_at: float = 0.0
     request_count: int = 0
+    #: How many times LinkedIn has handed us a refreshed li_at.
+    rotations: int = 0
     error_count: int = 0
     consecutive_errors: int = 0
     last_error: str | None = None
@@ -76,18 +83,14 @@ class LinkedInSession:
         return "; ".join(parts)
 
     def absorb(self, cookies: dict[str, str]) -> None:
-        """Store cookies LinkedIn set, so later requests echo them back.
-
-        `li_at` is deliberately never overwritten: the operator's configured
-        value stays authoritative, and LinkedIn echoing it back (or clearing
-        it) must not silently replace it.
-        """
+        """Store cookies LinkedIn set, so later requests echo them back."""
         for raw_name, raw_value in cookies.items():
             name = raw_name.strip()
             value = raw_value.strip()
             lowered = name.lower()
 
             if lowered == "li_at":
+                self.adopt_li_at(value)
                 continue
             if lowered == "jsessionid":
                 self.adopt_jsessionid(value)
@@ -97,6 +100,28 @@ class LinkedInSession:
                 self.extra_cookies.pop(name, None)
                 continue
             self.extra_cookies[name] = value
+
+    def adopt_li_at(self, value: str) -> None:
+        """Accept a refreshed ``li_at`` from ``Set-Cookie``.
+
+        LinkedIn rotates this cookie during a normal session and expects the
+        client to carry the new value forward, exactly as a browser would.
+        Continuing to replay the originally-configured token drifts out of
+        sync with LinkedIn's view of the session.
+
+        Deletion sentinels are *not* adopted: LinkedIn invalidates a session by
+        sending ``li_at`` with a 1970 expiry, and storing that would leave the
+        client authenticating with a tombstone. Those are handled as a rejected
+        session by the transport instead.
+        """
+        cleaned = value.strip().strip('"')
+        if not cleaned or cleaned.lower() in _COOKIE_TOMBSTONES:
+            return
+        if cleaned == self.li_at:
+            return
+        self.li_at = cleaned
+        self.rotations += 1
+        logger.info("session.li_at_rotated", session=self.label, rotations=self.rotations)
 
     def adopt_jsessionid(self, value: str) -> None:
         """Accept a JSESSIONID handed to us by LinkedIn via Set-Cookie.

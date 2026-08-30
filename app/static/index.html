@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>LinkedIn Profile API — console</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 32 32%27%3E%3Crect width=%2732%27 height=%2732%27 rx=%276%27 fill=%27%230E0E14%27/%3E%3Cpath d=%27M7 22V10h3v9h7v3z%27 fill=%27%23E2703A%27/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
@@ -242,7 +243,8 @@
 
     <div class="examples">
       <span>try</span>
-      <button class="ex" type="button" data-v="williamhgates">williamhgates</button>
+      <button class="ex" type="button" data-v="ada-lovelace">ada-lovelace (works offline)</button>
+      <button class="ex" type="button" data-v="williamhgates">williamhgates (needs a session)</button>
       <button class="ex" type="button" data-v="https://www.linkedin.com/in/satyanadella/">full URL</button>
       <button class="ex" type="button" data-v="https://www.linkedin.com/company/acme">a company URL (rejected)</button>
     </div>
@@ -255,16 +257,20 @@
       <span class="note" id="traceNote">idle</span>
     </div>
     <div class="trace">
+      <div class="lane" data-tier="voyager_dash" data-state="idle">
+        <span class="idx">01</span><span class="name">voyager_dash</span>
+        <span class="wire"><i></i></span><span class="verdict">—</span>
+      </div>
       <div class="lane" data-tier="voyager_graphql" data-state="idle">
-        <span class="idx">01</span><span class="name">voyager_graphql</span>
+        <span class="idx">02</span><span class="name">voyager_graphql</span>
         <span class="wire"><i></i></span><span class="verdict">—</span>
       </div>
       <div class="lane" data-tier="voyager_rest" data-state="idle">
-        <span class="idx">02</span><span class="name">voyager_rest</span>
+        <span class="idx">03</span><span class="name">voyager_rest</span>
         <span class="wire"><i></i></span><span class="verdict">—</span>
       </div>
       <div class="lane" data-tier="embedded_html" data-state="idle">
-        <span class="idx">03</span><span class="name">embedded_html</span>
+        <span class="idx">04</span><span class="name">embedded_html</span>
         <span class="wire"><i></i></span><span class="verdict">—</span>
       </div>
     </div>
@@ -301,7 +307,7 @@ function setLanes(state, verdict='—'){
    So earlier tiers are marked as having been tried and passed over, and the
    winner is marked ok. Nothing is invented about timings we did not measure. */
 function drawTrace(source, ms){
-  const order = ['voyager_graphql','voyager_rest','embedded_html'];
+  const order = ['voyager_dash','voyager_graphql','voyager_rest','embedded_html'];
   const hit = order.indexOf(source);
   lanes.forEach((l, i) => {
     const v = l.querySelector('.verdict');
@@ -370,8 +376,14 @@ const dr = d => { if(!d) return ''; const f=x=>x?[x.year,String(x.month??'').pad
 
 function renderProfile(r){
   const p = r.profile, b = p.basics, m = r.meta;
-  drawTrace(m.source, m.duration_ms);
-  note.textContent = `${m.source}${m.cached?' · cached':''}`;
+  const recorded = m.is_live === false || m.source === 'recorded_sample';
+  if (recorded) {
+    setLanes('skip', 'not attempted');
+    note.textContent = 'recorded sample';
+  } else {
+    drawTrace(m.source, m.duration_ms);
+    note.textContent = `${m.source}${m.cached?' · cached':''}`;
+  }
 
   const rows = (arr, t, s, d, logo) => arr.length ? arr.slice(0,6).map(x => `
     <div class="row">${img(x[logo])}<div>
@@ -386,6 +398,16 @@ function renderProfile(r){
                    x=>dr(x.dates), 'school_logo');
 
   out.innerHTML = `
+  ${recorded ? `<div class="msg warn">
+      <p class="code">recorded sample · not a live fetch</p>
+      <h3>Showing a recorded response</h3>
+      <p>Real LinkedIn data, captured earlier and replayed through the same
+         parsers — served because no valid LinkedIn session is configured.
+         The parsing and response pipeline below is exactly what a live
+         request produces.</p>
+      <div class="fix">To fetch live profiles, set <b>LINKEDIN_LI_AT</b> in
+         <code>.env</code> and restart.</div>
+    </div>` : ''}
   <div class="grid">
     <div>
       <div class="card">

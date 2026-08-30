@@ -12,11 +12,18 @@ import asyncio
 import time
 from datetime import UTC, datetime
 
+from app.linkedin.exceptions import (
+    AllTiersFailedError,
+    AuthenticationError,
+    LinkedInError,
+    NoHealthySessionError,
+)
 from app.linkedin.fetcher import ProfileFetcher
 from app.linkedin.profile_url import canonical_profile_url, extract_public_identifier
 from app.models.profile import Profile, ProfileResponse, ResponseMeta, Source
 from app.observability.logging import get_logger
 from app.services.cache import Cache
+from app.services.sample_store import build_sample_response, has_sample
 
 logger = get_logger(__name__)
 
@@ -24,10 +31,18 @@ CACHE_VERSION = "v1"
 
 
 class ProfileService:
-    def __init__(self, fetcher: ProfileFetcher, cache: Cache, *, ttl: int = 3600) -> None:
+    def __init__(
+        self,
+        fetcher: ProfileFetcher,
+        cache: Cache,
+        *,
+        ttl: int = 3600,
+        samples_enabled: bool = True,
+    ) -> None:
         self._fetcher = fetcher
         self._cache = cache
         self._ttl = ttl
+        self._samples_enabled = samples_enabled
         #: One in-flight fetch per public id, shared by all waiters.
         self._inflight: dict[str, asyncio.Task[ProfileResponse]] = {}
 
@@ -45,7 +60,23 @@ class ProfileService:
                 response.meta.duration_ms = round((time.monotonic() - started) * 1000)
                 return response
 
-        return await self._fetch_once(public_id, cache_key, started)
+        try:
+            return await self._fetch_once(public_id, cache_key, started)
+        except LinkedInError as exc:
+            # A recorded sample is a better answer than an error *only* when the
+            # failure is our credential rather than the request. A 404 or a
+            # private profile is a real answer and must not be papered over.
+            if self._samples_enabled and _is_credential_failure(exc) and has_sample(public_id):
+                sample = build_sample_response(public_id)
+                if sample is not None:
+                    logger.warning(
+                        "profile.serving_recorded_sample",
+                        public_id=public_id,
+                        because=type(exc).__name__,
+                    )
+                    sample.meta.duration_ms = round((time.monotonic() - started) * 1000)
+                    return sample
+            raise
 
     async def _fetch_once(
         self, public_id: str, cache_key: str, started: float
@@ -114,3 +145,12 @@ def empty_profile() -> Profile:
 
 
 __all__ = ["CACHE_VERSION", "ProfileService", "Source", "empty_profile"]
+
+
+#: Failures that mean "we cannot reach LinkedIn right now" rather than
+#: "LinkedIn answered and the profile is unavailable".
+_CREDENTIAL_FAILURES = (NoHealthySessionError, AuthenticationError, AllTiersFailedError)
+
+
+def _is_credential_failure(exc: LinkedInError) -> bool:
+    return isinstance(exc, _CREDENTIAL_FAILURES)

@@ -32,6 +32,8 @@ class Source(StrEnum):
     REST = "voyager_rest"
     HTML = "embedded_html"
     CACHE = "cache"
+    #: A real response captured earlier and replayed offline.
+    RECORDED = "recorded_sample"
 
 
 class _Base(BaseModel):
@@ -230,6 +232,14 @@ class ResponseMeta(_Base):
     profile_urn: str | None = None
     fetched_at: datetime
     source: Source
+    is_live: bool = Field(
+        default=True,
+        description=(
+            "False when this is a recorded sample rather than a live fetch. "
+            "Recorded responses are real captured LinkedIn data replayed "
+            "through the same parsers, served only when no session is usable."
+        ),
+    )
     cached: bool = False
     duration_ms: int = 0
     completeness: dict[str, bool] = Field(
