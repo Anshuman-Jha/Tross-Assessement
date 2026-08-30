@@ -1,0 +1,53 @@
+# Render blueprint. Deploy by pointing Render at this repo; it reads this file.
+#
+# Secrets are deliberately `sync: false`, which makes Render prompt for them in
+# the dashboard instead of reading them from the repository. No credential is
+# ever committed.
+services:
+  - type: web
+    name: linkedin-profile-api
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: free
+    region: oregon
+    healthCheckPath: /healthz
+    autoDeploy: true
+
+    envVars:
+      # --- secrets: entered in the Render dashboard, never in git -----------
+      - key: LINKEDIN_LI_AT
+        sync: false
+      - key: LINKEDIN_JSESSIONID
+        sync: false
+      - key: API_KEYS
+        sync: false
+
+      # --- non-secret configuration ----------------------------------------
+      - key: ENVIRONMENT
+        value: production
+      - key: LOG_LEVEL
+        value: INFO
+      - key: LOG_JSON
+        value: "true"
+      - key: REQUIRE_API_KEY
+        value: "true"
+
+      # Free instances sleep and share egress IPs, so pace conservatively.
+      - key: MAX_CONCURRENT_UPSTREAM
+        value: "3"
+      - key: REQUESTS_PER_MINUTE_PER_SESSION
+        value: "20"
+      - key: MIN_DELAY_BETWEEN_REQUESTS_MS
+        value: "500"
+      - key: JITTER_MS
+        value: "500"
+
+      # A longer TTL matters more here: every miss is upstream load, and a free
+      # instance that has just woken from sleep should not fan out immediately.
+      - key: CACHE_TTL_SECONDS
+        value: "7200"
+
+      - key: QUERY_ID_FILE
+        value: /app/data/query_ids.json
+      - key: ENABLE_QUERY_ID_DISCOVERY
+        value: "true"
