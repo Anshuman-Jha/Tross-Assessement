@@ -91,11 +91,41 @@ def profile_components_url(
     return f"{GRAPHQL_URL}?variables={variables}&queryId={query_id}"
 
 
-# ------------------------------------------------------------ tier 2: rest (legacy)
+# ------------------------------------------------- tier 1: dash (current, verified)
+
+#: Rest.li projection selecting the profile *and* its related entities —
+#: positions, educations, companies, schools — in a single response. Verified
+#: working against live LinkedIn; the number is the decoration version and is
+#: the part most likely to need bumping if LinkedIn revises the schema.
+DECO_FULL_PROFILE = "com.linkedin.voyager.dash.deco.identity.profile.FullProfileWithEntities-101"
+DECO_TOP_CARD = "com.linkedin.voyager.dash.deco.identity.profile.TopCardCore-6"
+
+
+def dash_profile_url(public_id: str, *, decoration: str = DECO_FULL_PROFILE) -> str:
+    """Look a profile up by public identifier on the modern dash endpoint.
+
+    This is the working replacement for the retired ``profileView``. It is a
+    Rest.li *finder* (``q=memberIdentity``) rather than a GraphQL persisted
+    query, which is why it needs **no queryId** — and therefore cannot be
+    broken by LinkedIn rotating those hashes.
+    """
+    return (
+        f"{VOYAGER_BASE}/identity/dash/profiles"
+        f"?q=memberIdentity&memberIdentity={restli_encode(public_id)}"
+        f"&decorationId={decoration}"
+    )
+
+
+# ------------------------------------------------------------ tier 3: rest (legacy)
 
 
 def profile_view_url(public_id: str) -> str:
-    """The legacy aggregate endpoint. Needs no queryId, so it fails independently."""
+    """The legacy aggregate endpoint.
+
+    Observed returning **410 Gone** against live LinkedIn — it has been
+    retired. Kept because it still answers for some older accounts and costs
+    nothing to try once the tiers above have failed.
+    """
     return f"{VOYAGER_BASE}/identity/profiles/{restli_encode(public_id)}/profileView"
 
 

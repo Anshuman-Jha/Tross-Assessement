@@ -26,6 +26,8 @@ from app.parsing.images import Image
 class Source(StrEnum):
     """Which acquisition tier produced the payload."""
 
+    #: The modern Rest.li finder. Needs no queryId, returns typed fields.
+    DASH = "voyager_dash"
     GRAPHQL = "voyager_graphql"
     REST = "voyager_rest"
     HTML = "embedded_html"

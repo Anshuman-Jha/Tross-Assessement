@@ -16,6 +16,7 @@ from app.linkedin.fetcher import ProfileFetcher
 from app.models.profile import Source
 from tests.factories import card, entity_component
 
+DASH = "https://www.linkedin.com/voyager/api/identity/dash/profiles"
 GRAPHQL = "https://www.linkedin.com/voyager/api/graphql"
 PROFILE_VIEW = "https://www.linkedin.com/voyager/api/identity/profiles/testuser/profileView"
 CONTACT_INFO = (
@@ -85,6 +86,12 @@ def _html_page() -> str:
 
 
 def _fetcher(client, resolver, **kwargs) -> ProfileFetcher:
+    """Fetcher with the dash tier off by default.
+
+    These tests predate the dash tier and exercise the graphql -> rest -> html
+    chain specifically; dash has its own tests in test_dash_tier.py.
+    """
+    kwargs.setdefault("enable_dash", False)
     return ProfileFetcher(client, resolver, **kwargs)
 
 

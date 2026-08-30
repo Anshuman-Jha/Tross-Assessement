@@ -209,7 +209,7 @@ reworded.
 | `LINKEDIN_CHALLENGE` | 502 | CAPTCHA/2FA checkpoint — verify in a browser |
 | `NO_HEALTHY_SESSION` | 503 | No usable session configured |
 | `QUERY_ID_INVALID` | 503 | GraphQL ids rotated; re-discovery triggered |
-| `ALL_TIERS_FAILED` | 502 | All three acquisition paths failed |
+| `ALL_TIERS_FAILED` | 502 | Every acquisition path failed |
 
 ---
 
@@ -453,10 +453,37 @@ Details that matter in practice:
 - **Degrees with commas.** `"BSc, Honours, Physics"` splits on the *last* comma,
   since degree names contain commas but fields of study rarely do.
 
-### Findings from probing live LinkedIn
+### Verified against live LinkedIn
 
-Three defects were found by testing against production LinkedIn rather than
-assumptions, each now covered by regression tests:
+Parsers were written against **captured real responses**, not assumed shapes.
+Confirmed working on `linkedin.com/in/williamhgates`:
+
+```
+source     voyager_dash
+name       Bill Gates
+headline   Chair, Gates Foundation and Founder, Breakthrough Energy
+about      Chair of the Gates Foundation. Founder of Breakthrough Energy…
+location   Seattle, Washington, United States   (country_code US)
+industry   Philanthropy      premium ✓   influencer ✓
+picture    100 / 200 / 400 / 800 px variants    cover image ✓
+experience Founder @ Breakthrough Energy    2015–present
+           Co-chair @ Gates Foundation      2000–present
+           Co-founder @ Microsoft           1975–present
+education  Harvard University · Lakeside School
+```
+
+Two things the probing changed about the design:
+
+* **`profileView` is retired** — it returns `410 Gone`. Every scraper built on
+  it is dead. The dash finder replaced it as the primary tier.
+* **Profile pages are now React Server Components.** No `bpr-guid`, no
+  `artdeco`, sections lazy-loaded. The HTML tier was rewritten for the new
+  format.
+
+### Defects found by probing production
+
+Four bugs that mocks would never have surfaced, each now covered by regression
+tests:
 
 - **Trailing-slash redirect.** LinkedIn 301s `/in/<slug>/` → `/in/<slug>`.
   Treating redirects as errors broke the HTML tier even with a valid session.
@@ -470,6 +497,13 @@ assumptions, each now covered by regression tests:
   does that on a document navigation. Page requests now use
   `sec-fetch-mode: navigate` / `sec-fetch-dest: document` and omit every
   XHR-only header.
+- **Missing session bootstrap.** Voyager rejects an API call carrying no CSRF
+  token, and that token *is* the `JSESSIONID` cookie — which you only have
+  after loading a page. A browser never hits this; a bare API client does. The
+  client now loads a page first, which also guarantees the CSRF pair is matched
+  by construction. Supplying a mismatched `JSESSIONID` is what caused LinkedIn
+  to *revoke* sessions during development, logging the operator out of their
+  own browser.
 
 ---
 
@@ -479,28 +513,54 @@ assumptions, each now covered by regression tests:
 
 Tried in order; whichever answers is reported in `meta.source`.
 
-| Tier | Source | Depends on | Notes |
+| Tier | Source | Depends on | Status (verified against live LinkedIn) |
 |---|---|---|---|
-| 1 | `voyager_graphql` | live `queryId` | Primary. Richest data. |
-| 2 | `voyager_rest` | legacy `profileView` | **Structured** dates, so highest fidelity where it survives. Being retired by LinkedIn. |
-| 3 | `embedded_html` | nothing | Safety net. |
+| 1 | `voyager_dash` | nothing | ✅ **Working.** The primary path. |
+| 2 | `voyager_graphql` | a live `queryId` | ⚠️ Unverified — no ids discoverable on current pages. |
+| 3 | `voyager_rest` | legacy `profileView` | ❌ **410 Gone.** LinkedIn retired it. |
+| 4 | `embedded_html` | nothing | ✅ Working, but partial — see below. |
 
-**Tier 3 is the interesting one.** LinkedIn server-renders pages with a BigPipe
-pattern that inlines the API responses the page is about to need:
+**Tier 1 (`voyager_dash`) is the one that works**, and it is worth saying why it
+is the right primary rather than GraphQL:
+
+```
+GET /voyager/api/identity/dash/profiles
+      ?q=memberIdentity&memberIdentity=<slug>
+      &decorationId=com.linkedin.voyager.dash.deco.identity.profile.FullProfileWithEntities-101
+```
+
+* It is a Rest.li **finder**, not a persisted GraphQL query, so it needs **no
+  `queryId`** and cannot be broken by LinkedIn rotating those hashes.
+* The `decorationId` is a projection: `FullProfileWithEntities` inlines the
+  profile *and* its positions, educations, companies and schools in one request.
+* Values come back as **typed fields** — `dateRange: {start: {year: 2000}}` —
+  not localised captions like `"Mar 2021 - Present · 3 yrs"`. Nothing has to be
+  recovered from display text, which makes it the highest-fidelity source.
+
+**Tier 4 handles LinkedIn's page rewrite.** Older pages server-rendered with a
+BigPipe pattern that inlined the API responses the page was about to need:
 
 ```html
 <code style="display:none" id="bpr-guid-1234567">{"data":…,"included":[…]}</code>
 ```
 
-Those are byte-for-byte the same Voyager payloads the GraphQL endpoints return,
-so **the existing parsers consume them unchanged**. It needs no `queryId`, so it
-survives the rotation that kills Tier 1 — and it is still a plain authenticated
-`GET`, no browser and no JS execution. It ranks third only because LinkedIn
-inlines just what the initial viewport needs, so long sections arrive truncated
-(disclosed via `warnings`).
+LinkedIn has since **migrated profile pages to React Server Components**. The
+`bpr-guid` blocks are gone, `artdeco` is gone, and the data now arrives as an
+RSC Flight payload in `<script id="rehydrate-data">` alongside server-rendered
+markup with build-hashed class names. Both generations are handled: the legacy
+extractor still runs, and `app/parsing/rsc_profile.py` reads the new format,
+anchoring on content and structure rather than on class names that change every
+build.
+
+This tier ranks last because the new pages **lazy-load** experience, education
+and skills after hydration, so only the top card (name, headline, location,
+images) is present in the initial HTML. That gap is disclosed through
+`warnings` and `meta.completeness` rather than reported as genuinely empty
+sections.
 
 The tiers fail independently, which is the entire point: the failure mode that
-kills one usually leaves the others standing.
+kills one usually leaves the others standing. That is not theoretical here —
+LinkedIn retired `profileView` outright, and the service keeps working.
 
 ### Degradation, not failure
 

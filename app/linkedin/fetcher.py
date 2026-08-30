@@ -44,8 +44,10 @@ from app.linkedin.query_ids import (
 )
 from app.models.profile import Profile, Source
 from app.observability.logging import get_logger
+from app.parsing import rsc_profile as rsc
 from app.parsing.collection import EntityIndex, find_all
 from app.parsing.components import FlatEntity, flatten_card_payload
+from app.parsing.dash_profile import parse_dash_profile
 from app.parsing.rest_profile import parse_rest_profile
 from app.parsing.sections.basics import parse_basics, parse_contact_info
 from app.parsing.sections.education import parse_education
@@ -144,6 +146,7 @@ class ProfileFetcher:
         client: VoyagerClient,
         query_ids: QueryIdResolver,
         *,
+        enable_dash: bool = True,
         enable_graphql: bool = True,
         enable_rest: bool = True,
         enable_html: bool = True,
@@ -151,6 +154,7 @@ class ProfileFetcher:
     ) -> None:
         self._client = client
         self._query_ids = query_ids
+        self._enable_dash = enable_dash
         self._enable_graphql = enable_graphql
         self._enable_rest = enable_rest
         self._enable_html = enable_html
@@ -163,6 +167,7 @@ class ProfileFetcher:
         attempts: list[tuple[str, Exception]] = []
 
         for name, enabled, runner in (
+            ("dash", self._enable_dash, self._fetch_dash),
             ("graphql", self._enable_graphql, self._fetch_graphql),
             ("rest", self._enable_rest, self._fetch_rest),
             ("html", self._enable_html, self._fetch_html),
@@ -210,7 +215,46 @@ class ProfileFetcher:
             detail={"attempts": {n: str(e) for n, e in attempts}},
         )
 
-    # --------------------------------------------------------- tier 1: graphql
+    # ------------------------------------------------------------ tier 1: dash
+
+    async def _fetch_dash(self, public_id: str) -> FetchResult | None:
+        """The modern Rest.li finder — the primary path.
+
+        Preferred over GraphQL because it needs no ``queryId`` (so LinkedIn
+        rotating those cannot break it) and returns typed fields rather than
+        localised display strings, so dates arrive structured instead of being
+        recovered from captions.
+        """
+        payload = await self._client.get_json(
+            endpoints.dash_profile_url(public_id),
+            referer=endpoints.profile_html_url(public_id),
+        )
+        profile = parse_dash_profile(payload, public_id=public_id)
+
+        urn = None
+        for entity in EntityIndex(payload).entities:
+            candidate = entity.get("entityUrn")
+            if isinstance(candidate, str) and "fsd_profile:" in candidate:
+                urn = normalize_profile_urn(candidate)
+                break
+
+        warnings: list[str] = []
+        # Contact details sit behind their own endpoint and are only ever
+        # populated for connections who chose to share them.
+        try:
+            contact_payload = await self._client.get_json(
+                endpoints.profile_contact_info_url(public_id),
+                referer=endpoints.profile_html_url(public_id),
+            )
+            profile.basics.contact = parse_contact_info(contact_payload)
+        except LinkedInError:
+            pass
+
+        return FetchResult(
+            profile=profile, source=Source.DASH, profile_urn=urn, warnings=warnings
+        )
+
+    # --------------------------------------------------------- tier 2: graphql
 
     async def _fetch_graphql(self, public_id: str) -> FetchResult | None:
         await self._query_ids.ensure_fresh(self._client)
@@ -367,6 +411,14 @@ class ProfileFetcher:
     # ------------------------------------------------------------ tier 3: html
 
     async def _fetch_html(self, public_id: str) -> FetchResult | None:
+        """Read the profile page itself.
+
+        Two page generations are handled. LinkedIn is migrating profiles to
+        React Server Components, where the old inlined Voyager payloads are
+        gone and the data lives in an RSC Flight payload plus server-rendered
+        markup. Older pages still ship ``bpr-guid`` blocks. Whichever this is,
+        the richer result wins.
+        """
         url = endpoints.profile_html_url(public_id)
         page = await self._client.get_html(url, referer="https://www.linkedin.com/feed/")
 
@@ -376,38 +428,52 @@ class ProfileFetcher:
                 "The li_at cookie is expired or invalid."
             )
 
+        warnings: list[str] = []
+        profile: Profile | None = None
+        urn: str | None = None
+
+        # --- legacy: Voyager payloads inlined as bpr-guid blocks -------------
         payload = payload_from_html(page)
-        if not has_profile_content(payload):
-            raise ProfileNotFoundError(
-                f"No profile data was embedded in the page for {public_id!r}."
+        if has_profile_content(payload):
+            index = EntityIndex(payload)
+            profile = parse_rest_profile(payload, public_id=public_id)
+            entities = flatten_card_payload(payload)
+            if entities:
+                profile.experience = profile.experience or parse_experience(entities)
+                profile.education = profile.education or parse_education(entities)
+                profile.skills = profile.skills or parse_skills(entities)
+            if not profile.basics.full_name:
+                profile.basics = parse_basics(index, public_id=public_id, top_card=entities)
+            for entity in index.entities:
+                candidate = entity.get("entityUrn")
+                if isinstance(candidate, str) and "fsd_profile" in candidate:
+                    urn = normalize_profile_urn(candidate)
+                    break
+            warnings.append(
+                "Served from embedded page data; long sections may be truncated "
+                "to what LinkedIn renders on initial load."
             )
 
-        index = EntityIndex(payload)
-        warnings = [
-            "Served from embedded page data; long sections may be truncated to "
-            "what LinkedIn renders on initial load."
-        ]
+        # --- current: React Server Components --------------------------------
+        if profile is None or not profile.basics.full_name:
+            rsc_profile = rsc.parse_rsc_profile(page, public_id=public_id)
+            if rsc_profile.basics.full_name or rsc_profile.basics.headline:
+                profile = rsc_profile
+                urn = urn or rsc.profile_urn_from_page(page)
+                if rsc.sections_are_lazy_loaded(page):
+                    # Say why the sections are absent. They are not empty on
+                    # LinkedIn — the page simply has not fetched them yet.
+                    warnings.append(
+                        "Read from the server-rendered profile page. LinkedIn now "
+                        "lazy-loads experience, education and skills after "
+                        "hydration, so those sections are not present in the "
+                        "initial HTML and are reported as empty here."
+                    )
 
-        # The page embeds both shapes depending on which renderer served it, so
-        # read it as REST first and top up from any component trees present.
-        profile = parse_rest_profile(payload, public_id=public_id)
-        entities = flatten_card_payload(payload)
-        if entities:
-            if not profile.experience:
-                profile.experience = parse_experience(entities)
-            if not profile.education:
-                profile.education = parse_education(entities)
-            if not profile.skills:
-                profile.skills = parse_skills(entities)
-        if not profile.basics.full_name:
-            profile.basics = parse_basics(index, public_id=public_id, top_card=entities)
-
-        urn = None
-        for entity in index.entities:
-            candidate = entity.get("entityUrn")
-            if isinstance(candidate, str) and "fsd_profile" in candidate:
-                urn = normalize_profile_urn(candidate)
-                break
+        if profile is None or not (profile.basics.full_name or profile.basics.headline):
+            raise ProfileNotFoundError(
+                f"No profile data could be read from the page for {public_id!r}."
+            )
 
         return FetchResult(
             profile=profile, source=Source.HTML, profile_urn=urn, warnings=warnings

@@ -332,3 +332,38 @@ def test_an_unknown_format_is_rejected(make_client, auth_headers) -> None:
         headers=auth_headers,
     )
     assert response.status_code == 422
+
+
+# ------------------------------------------------------------------- console UI
+
+
+def test_root_serves_the_console_ui(make_client) -> None:
+    client = make_client(StubFetcher())
+    response = client.get("/")
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/html")
+    body = response.text
+    assert "<title>" in body
+    # The UI's job is to make the acquisition path visible.
+    assert "voyager_graphql" in body
+    assert "Acquisition trace" in body
+
+
+def test_service_descriptor_still_available_as_json(make_client) -> None:
+    client = make_client(StubFetcher())
+    body = client.get("/api").json()
+
+    assert body["service"] == "LinkedIn Profile API"
+    assert body["ui"] == "/"
+    assert "GET /api/v1/profile?url=..." in body["endpoints"]
+
+
+def test_ui_does_not_embed_any_credential(make_client) -> None:
+    """The page is served to anyone; it must never carry server-side secrets."""
+    client = make_client(StubFetcher())
+    body = client.get("/").text
+
+    assert "test-li-at" not in body
+    assert "ajax:1234567890" not in body
+    assert "test-key" not in body, "API keys are entered by the user, never baked in"

@@ -16,7 +16,7 @@ from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, Response
 
 from app.api.deps import configure_limiter
 from app.api.errors import register_error_handlers
@@ -97,6 +97,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     fetcher = ProfileFetcher(
         client,
         resolver,
+        enable_dash=settings.enable_dash_tier,
         enable_graphql=settings.enable_graphql_tier,
         enable_rest=settings.enable_rest_tier,
         enable_html=settings.enable_html_tier,
@@ -171,24 +172,39 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(health.router)
     app.include_router(profile.router)
 
+    static_dir = Path(__file__).parent / "static"
+    index_file = static_dir / "index.html"
+
     @app.get("/", include_in_schema=False)
-    async def root() -> JSONResponse:
-        return JSONResponse(
-            {
-                "service": "LinkedIn Profile API",
-                "version": "1.0.0",
-                "docs": "/docs",
-                "health": "/healthz",
-                "readiness": "/readyz",
-                "endpoints": {
-                    "POST /api/v1/profile": 'body: {"url": "<linkedin profile url>"}',
-                    "GET /api/v1/profile?url=...": "query-string form",
-                    "GET /api/v1/profile/{public_id}": "by public identifier",
-                },
-            }
-        )
+    async def root() -> Response:
+        """The console UI, or the service descriptor if it is missing."""
+        if index_file.is_file():
+            return FileResponse(index_file, media_type="text/html")
+        return JSONResponse(_service_info())
+
+    @app.get("/api", include_in_schema=False)
+    async def service_info() -> JSONResponse:
+        """Machine-readable service descriptor."""
+        return JSONResponse(_service_info())
 
     return app
+
+
+def _service_info() -> dict[str, object]:
+    return {
+        "service": "LinkedIn Profile API",
+        "version": "1.0.0",
+        "ui": "/",
+        "docs": "/docs",
+        "health": "/healthz",
+        "readiness": "/readyz",
+        "endpoints": {
+            "POST /api/v1/profile": 'body: {"url": "<linkedin profile url>"}',
+            "GET /api/v1/profile?url=...": "query-string form",
+            "GET /api/v1/profile/{public_id}": "by public identifier",
+            "GET /api/v1/profile?url=...&format=flat": "PhantomBuster-style flat record",
+        },
+    }
 
 
 app = create_app()

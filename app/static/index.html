@@ -1,0 +1,467 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LinkedIn Profile API — console</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --ink:#0E0E14;          /* ground: indigo-charcoal, not black */
+    --ink-2:#16161F;
+    --ink-3:#1E1E2A;
+    --line:#2A2A38;
+    --text:#E6E4EF;
+    --muted:#8B88A0;
+    --dim:#5A576B;
+    --signal:#E2703A;       /* copper: the active/attempt colour */
+    --ok:#4FB286;           /* the tier that answered */
+    --warn:#D9A441;
+    --fail:#9B4A5A;
+    --violet:#7B6CF6;
+    --r:3px;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{
+    background:var(--ink); color:var(--text);
+    font-family:'Space Grotesk',system-ui,-apple-system,sans-serif;
+    font-size:15px; line-height:1.55;
+    -webkit-font-smoothing:antialiased;
+    padding:0 20px 80px;
+  }
+  .wrap{max-width:1000px;margin:0 auto}
+  code,kbd,.mono{font-family:'IBM Plex Mono',ui-monospace,Menlo,monospace}
+
+  /* ---------- masthead ---------- */
+  header{padding:44px 0 26px;border-bottom:1px solid var(--line)}
+  .eyebrow{
+    font-family:'IBM Plex Mono',monospace; font-size:11px; letter-spacing:.14em;
+    text-transform:uppercase; color:var(--signal); margin:0 0 10px;
+  }
+  h1{
+    font-size:clamp(26px,4.4vw,40px); font-weight:700; letter-spacing:-.02em;
+    margin:0 0 10px; line-height:1.1;
+  }
+  h1 em{font-style:normal;color:var(--muted)}
+  .sub{color:var(--muted);margin:0;max-width:62ch;font-size:14.5px}
+  .sub b{color:var(--text);font-weight:500}
+
+  /* ---------- query bar ---------- */
+  form{display:flex;gap:10px;margin:26px 0 0;flex-wrap:wrap}
+  .field{flex:1 1 380px;position:relative;display:flex;align-items:center}
+  .field .pfx{
+    position:absolute;left:13px;font-family:'IBM Plex Mono',monospace;
+    font-size:13px;color:var(--dim);pointer-events:none;
+  }
+  input[type=text]{
+    width:100%;background:var(--ink-2);border:1px solid var(--line);
+    border-radius:var(--r);color:var(--text);padding:13px 14px 13px 32px;
+    font-family:'IBM Plex Mono',monospace;font-size:13.5px;
+    transition:border-color .15s,background .15s;
+  }
+  input[type=text]::placeholder{color:var(--dim)}
+  input[type=text]:focus{outline:none;border-color:var(--signal);background:var(--ink-3)}
+  button{
+    background:var(--signal);color:#140A05;border:0;border-radius:var(--r);
+    padding:13px 22px;font-family:'Space Grotesk',sans-serif;font-weight:700;
+    font-size:14px;cursor:pointer;letter-spacing:.01em;
+    transition:filter .15s,opacity .15s;
+  }
+  button:hover:not(:disabled){filter:brightness(1.1)}
+  button:disabled{opacity:.45;cursor:not-allowed}
+  button:focus-visible,input:focus-visible,summary:focus-visible,.ex:focus-visible{
+    outline:2px solid var(--violet);outline-offset:2px
+  }
+  .keyrow{display:flex;gap:9px;align-items:center;margin:11px 0 0;flex-wrap:wrap}
+  .keyrow label{font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:var(--dim)}
+  .keyrow input{
+    background:var(--ink-2);border:1px solid var(--line);border-radius:var(--r);
+    color:var(--text);padding:7px 11px;font-family:'IBM Plex Mono',monospace;
+    font-size:12px;width:230px;
+  }
+  .keyrow input:focus{outline:none;border-color:var(--signal)}
+  .keyrow .hint{font-size:11px;color:var(--dim);font-family:'IBM Plex Mono',monospace}
+
+  .examples{display:flex;gap:7px;flex-wrap:wrap;margin:12px 0 0;align-items:center}
+  .examples span{font-size:11.5px;color:var(--dim);font-family:'IBM Plex Mono',monospace}
+  .ex{
+    background:none;border:1px solid var(--line);color:var(--muted);
+    border-radius:99px;padding:4px 11px;font-size:11.5px;cursor:pointer;
+    font-family:'IBM Plex Mono',monospace;font-weight:400;letter-spacing:0;
+  }
+  .ex:hover{border-color:var(--signal);color:var(--text)}
+
+  /* ---------- signature: the tier trace ---------- */
+  .panel{margin:30px 0 0;border:1px solid var(--line);border-radius:var(--r);background:var(--ink-2)}
+  .panel-h{
+    display:flex;justify-content:space-between;align-items:baseline;gap:12px;
+    padding:12px 16px;border-bottom:1px solid var(--line);
+  }
+  .panel-h h2{
+    margin:0;font-family:'IBM Plex Mono',monospace;font-size:11px;
+    letter-spacing:.14em;text-transform:uppercase;color:var(--muted);font-weight:500;
+  }
+  .panel-h .note{font-size:11.5px;color:var(--dim);font-family:'IBM Plex Mono',monospace}
+
+  .trace{padding:6px 0}
+  .lane{
+    display:grid;grid-template-columns:26px 150px 1fr auto;
+    align-items:center;gap:14px;padding:11px 16px;
+  }
+  .lane + .lane{border-top:1px solid rgba(42,42,56,.5)}
+  .lane .idx{
+    font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--dim);
+  }
+  .lane .name{font-family:'IBM Plex Mono',monospace;font-size:12.5px;color:var(--muted)}
+  /* the wire: a signal path that fills as the tier is attempted */
+  .wire{height:2px;background:var(--ink-3);border-radius:2px;overflow:hidden;position:relative}
+  .wire i{
+    display:block;height:100%;width:0;background:var(--dim);
+    transition:width .5s cubic-bezier(.4,0,.2,1);
+  }
+  .lane .verdict{
+    font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:var(--dim);
+    white-space:nowrap;min-width:96px;text-align:right;
+  }
+  .lane[data-state=trying] .name{color:var(--signal)}
+  .lane[data-state=trying] .wire i{width:70%;background:var(--signal);animation:pulse 1.1s ease-in-out infinite}
+  .lane[data-state=trying] .verdict{color:var(--signal)}
+  .lane[data-state=ok] .name{color:var(--ok)}
+  .lane[data-state=ok] .wire i{width:100%;background:var(--ok)}
+  .lane[data-state=ok] .verdict{color:var(--ok)}
+  .lane[data-state=fail] .wire i{width:100%;background:var(--fail)}
+  .lane[data-state=fail] .verdict{color:var(--fail)}
+  .lane[data-state=skip]{opacity:.45}
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.45}}
+  @media (prefers-reduced-motion:reduce){
+    .wire i{transition:none}
+    .lane[data-state=trying] .wire i{animation:none}
+  }
+
+  /* ---------- result ---------- */
+  .grid{display:grid;grid-template-columns:1.35fr 1fr;gap:18px;margin-top:18px}
+  @media(max-width:760px){.grid{grid-template-columns:1fr}}
+  .card{border:1px solid var(--line);border-radius:var(--r);background:var(--ink-2);padding:18px}
+  .who{display:flex;gap:14px;align-items:flex-start}
+  .who img{width:60px;height:60px;border-radius:var(--r);object-fit:cover;background:var(--ink-3);flex:none}
+  .who .nm{font-size:20px;font-weight:700;letter-spacing:-.01em;margin:0 0 3px;line-height:1.25}
+  .who .hl{color:var(--muted);font-size:13.5px;margin:0 0 5px}
+  .who .loc{color:var(--dim);font-size:12px;margin:0;font-family:'IBM Plex Mono',monospace}
+  .about{margin:15px 0 0;padding-top:14px;border-top:1px solid var(--line);font-size:13.5px;color:var(--muted);white-space:pre-wrap}
+
+  .sect{margin-top:16px;padding-top:14px;border-top:1px solid var(--line)}
+  .sect h3{
+    font-family:'IBM Plex Mono',monospace;font-size:10.5px;letter-spacing:.14em;
+    text-transform:uppercase;color:var(--dim);margin:0 0 10px;font-weight:500;
+  }
+  .row{display:flex;gap:11px;padding:8px 0}
+  .row + .row{border-top:1px solid rgba(42,42,56,.45)}
+  .row img{width:32px;height:32px;border-radius:2px;object-fit:contain;background:var(--ink-3);flex:none}
+  .row .t{font-size:13.5px;font-weight:500;margin:0}
+  .row .s{font-size:12.5px;color:var(--muted);margin:1px 0 0}
+  .row .d{font-size:11.5px;color:var(--dim);margin:2px 0 0;font-family:'IBM Plex Mono',monospace}
+  .chips{display:flex;flex-wrap:wrap;gap:6px}
+  .chip{
+    background:var(--ink-3);border:1px solid var(--line);border-radius:99px;
+    padding:3px 10px;font-size:11.5px;color:var(--muted);font-family:'IBM Plex Mono',monospace;
+  }
+
+  /* completeness: what we got vs what exists */
+  .meta dl{display:grid;grid-template-columns:auto 1fr;gap:5px 12px;margin:0 0 14px;
+    font-family:'IBM Plex Mono',monospace;font-size:11.5px}
+  .meta dt{color:var(--dim)}
+  .meta dd{margin:0;color:var(--text);text-align:right;word-break:break-all}
+  .cgrid{display:grid;grid-template-columns:1fr 1fr;gap:3px 12px;
+    font-family:'IBM Plex Mono',monospace;font-size:11.5px}
+  .cgrid div{display:flex;justify-content:space-between;gap:8px;padding:2px 0}
+  .cgrid span:first-child{color:var(--muted)}
+  .yes{color:var(--ok)}.no{color:var(--dim)}
+
+  /* ---------- states ---------- */
+  .msg{border:1px solid var(--line);border-left:3px solid var(--signal);
+    border-radius:var(--r);background:var(--ink-2);padding:16px 18px;margin-top:18px}
+  .msg.bad{border-left-color:var(--fail)}
+  .msg.warn{border-left-color:var(--warn)}
+  .msg h3{margin:0 0 6px;font-size:14px;font-weight:700}
+  .msg .code{font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--dim);
+    letter-spacing:.1em;text-transform:uppercase;margin:0 0 8px}
+  .msg p{margin:0;color:var(--muted);font-size:13.5px}
+  .msg .fix{margin-top:12px;padding-top:11px;border-top:1px solid var(--line);
+    font-size:12.5px;color:var(--muted)}
+  .msg .fix b{color:var(--text);font-weight:500}
+  .msg pre{background:var(--ink);border:1px solid var(--line);border-radius:2px;
+    padding:9px 11px;margin:8px 0 0;overflow-x:auto;font-size:11.5px;color:var(--muted)}
+
+  details{margin-top:18px;border:1px solid var(--line);border-radius:var(--r);background:var(--ink-2)}
+  summary{padding:12px 16px;cursor:pointer;font-family:'IBM Plex Mono',monospace;
+    font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted);list-style:none}
+  summary::-webkit-details-marker{display:none}
+  summary::before{content:'▸ ';color:var(--signal)}
+  details[open] summary::before{content:'▾ '}
+  details pre{margin:0;padding:14px 16px;border-top:1px solid var(--line);
+    overflow-x:auto;font-size:11.5px;line-height:1.6;color:var(--muted);max-height:420px}
+
+  footer{margin-top:40px;padding-top:18px;border-top:1px solid var(--line);
+    display:flex;justify-content:space-between;gap:14px;flex-wrap:wrap;
+    font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:var(--dim)}
+  footer a{color:var(--muted);text-decoration:none;border-bottom:1px solid var(--line)}
+  footer a:hover{color:var(--signal);border-color:var(--signal)}
+  .hidden{display:none !important}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <p class="eyebrow">Voyager · reverse-engineered · no browser</p>
+    <h1>LinkedIn Profile API <em>console</em></h1>
+    <p class="sub">
+      Paste a profile URL. The request goes straight to LinkedIn's private
+      <b>Voyager</b> endpoints over HTTP — no headless browser, no JavaScript execution.
+      Three acquisition tiers are tried in order; you can watch which one answers.
+    </p>
+
+    <form id="f" autocomplete="off">
+      <div class="field">
+        <span class="pfx">in/</span>
+        <input id="u" type="text" placeholder="williamhgates  ·  or a full linkedin.com/in/… URL"
+               aria-label="LinkedIn profile URL or public identifier" required>
+      </div>
+      <button id="go" type="submit">Fetch profile</button>
+    </form>
+
+    <div class="keyrow hidden" id="keyrow">
+      <label for="k">API key</label>
+      <input id="k" type="password" placeholder="X-API-Key" autocomplete="off"
+             aria-label="API key sent as the X-API-Key header">
+      <span class="hint">stored in this browser only</span>
+    </div>
+
+    <div class="examples">
+      <span>try</span>
+      <button class="ex" type="button" data-v="williamhgates">williamhgates</button>
+      <button class="ex" type="button" data-v="https://www.linkedin.com/in/satyanadella/">full URL</button>
+      <button class="ex" type="button" data-v="https://www.linkedin.com/company/acme">a company URL (rejected)</button>
+    </div>
+  </header>
+
+  <!-- SIGNATURE: the acquisition path, made visible -->
+  <section class="panel" id="tracePanel">
+    <div class="panel-h">
+      <h2>Acquisition trace</h2>
+      <span class="note" id="traceNote">idle</span>
+    </div>
+    <div class="trace">
+      <div class="lane" data-tier="voyager_graphql" data-state="idle">
+        <span class="idx">01</span><span class="name">voyager_graphql</span>
+        <span class="wire"><i></i></span><span class="verdict">—</span>
+      </div>
+      <div class="lane" data-tier="voyager_rest" data-state="idle">
+        <span class="idx">02</span><span class="name">voyager_rest</span>
+        <span class="wire"><i></i></span><span class="verdict">—</span>
+      </div>
+      <div class="lane" data-tier="embedded_html" data-state="idle">
+        <span class="idx">03</span><span class="name">embedded_html</span>
+        <span class="wire"><i></i></span><span class="verdict">—</span>
+      </div>
+    </div>
+  </section>
+
+  <div id="out"></div>
+
+  <footer>
+    <span>Three tiers fail independently — that is the point.</span>
+    <span><a href="/docs">OpenAPI docs</a> · <a href="/readyz">readiness</a></span>
+  </footer>
+</div>
+
+<script>
+const $ = s => document.querySelector(s);
+const out = $('#out'), note = $('#traceNote'), btn = $('#go'), input = $('#u');
+const lanes = [...document.querySelectorAll('.lane')];
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+const keyInput = $('#k'), keyRow = $('#keyrow');
+const KEY_STORE = 'lipa.apikey';
+try { keyInput.value = localStorage.getItem(KEY_STORE) || ''; } catch {}
+if (keyInput.value) keyRow.classList.remove('hidden');
+keyInput.oninput = () => { try { localStorage.setItem(KEY_STORE, keyInput.value.trim()); } catch {} };
+
+document.querySelectorAll('.ex').forEach(b =>
+  b.onclick = () => { input.value = b.dataset.v; $('#f').requestSubmit(); });
+
+function setLanes(state, verdict='—'){
+  lanes.forEach(l => { l.dataset.state = state; l.querySelector('.verdict').textContent = verdict; });
+}
+
+/* The trace is honest: the API reports which tier answered, not each attempt.
+   So earlier tiers are marked as having been tried and passed over, and the
+   winner is marked ok. Nothing is invented about timings we did not measure. */
+function drawTrace(source, ms){
+  const order = ['voyager_graphql','voyager_rest','embedded_html'];
+  const hit = order.indexOf(source);
+  lanes.forEach((l, i) => {
+    const v = l.querySelector('.verdict');
+    if (hit === -1) { l.dataset.state='idle'; v.textContent='—'; return; }
+    if (i < hit)  { l.dataset.state='fail'; v.textContent='passed over'; }
+    if (i === hit){ l.dataset.state='ok';   v.textContent=`answered · ${ms}ms`; }
+    if (i > hit)  { l.dataset.state='skip'; v.textContent='not needed'; }
+  });
+}
+
+const FIXES = {
+  NO_HEALTHY_SESSION: {
+    title:'No usable LinkedIn session',
+    fix:`Set <b>LINKEDIN_LI_AT</b> in <code>.env</code> and restart. Copy the <code>li_at</code>
+         cookie from a browser logged into LinkedIn (DevTools → Application → Cookies).
+         Leave <b>LINKEDIN_JSESSIONID</b> empty — the service negotiates its own, which
+         avoids the CSRF mismatch that gets sessions revoked.`
+  },
+  SESSION_INVALID: {
+    title:'LinkedIn rejected the session',
+    fix:`The <code>li_at</code> cookie has expired or been revoked. Signing out of the browser
+         you copied it from invalidates it immediately. Copy a fresh one and restart.`
+  },
+  LINKEDIN_CHALLENGE: {
+    title:'LinkedIn wants a security check',
+    fix:`Open LinkedIn in a browser with this account and clear the checkpoint (CAPTCHA,
+         2FA or email code), then copy a fresh cookie.`
+  },
+  INVALID_PROFILE_URL: {
+    title:'Not a profile URL',
+    fix:`This endpoint reads personal profiles only — the <code>/in/&lt;slug&gt;</code> path.
+         Company, school and job URLs are different objects.`
+  },
+  RATE_LIMITED: {
+    title:'LinkedIn is throttling this account',
+    fix:`Wait for the period in <code>Retry-After</code>. Lower
+         <code>REQUESTS_PER_MINUTE_PER_SESSION</code>, or add accounts — do not raise the pacing.`
+  },
+  UNAUTHORIZED: {
+    title:'This deployment requires an API key',
+    fix:`Enter the key above — it is sent as <code>X-API-Key</code> and kept in this
+         browser only. Keys are configured server-side via <code>API_KEYS</code>.`
+  },
+  PROFILE_NOT_FOUND: { title:'No such profile', fix:`Check the slug. LinkedIn returned 404.` },
+  PROFILE_PRIVATE:   { title:'Profile not visible', fix:`It is private, or out of network for the account in use.` },
+  ALL_TIERS_FAILED:  { title:'All three tiers failed', fix:`Every acquisition path was tried. The per-tier reasons are in the raw response below.` }
+};
+
+function renderError(e, status){
+  setLanes('idle');
+  note.textContent = 'failed';
+  const meta = FIXES[e.error] || { title:'Request failed', fix:'' };
+  out.innerHTML = `
+    <div class="msg bad">
+      <p class="code">${esc(e.error || 'ERROR')} · HTTP ${status}</p>
+      <h3>${esc(meta.title)}</h3>
+      <p>${esc(e.message || '')}</p>
+      ${meta.fix ? `<div class="fix">${meta.fix}</div>` : ''}
+    </div>
+    <details><summary>Raw response</summary><pre>${esc(JSON.stringify(e,null,2))}</pre></details>`;
+}
+
+const img = o => o?.url ? `<img src="${esc(o.url)}" alt="" loading="lazy" onerror="this.style.visibility='hidden'">` : '';
+const dr = d => { if(!d) return ''; const f=x=>x?[x.year,String(x.month??'').padStart(2,'0')].filter(Boolean).join('-'):'';
+  return [f(d.start), d.is_current?'Present':f(d.end)].filter(Boolean).join(' → '); };
+
+function renderProfile(r){
+  const p = r.profile, b = p.basics, m = r.meta;
+  drawTrace(m.source, m.duration_ms);
+  note.textContent = `${m.source}${m.cached?' · cached':''}`;
+
+  const rows = (arr, t, s, d, logo) => arr.length ? arr.slice(0,6).map(x => `
+    <div class="row">${img(x[logo])}<div>
+      <p class="t">${esc(t(x))}</p>
+      ${s(x)?`<p class="s">${esc(s(x))}</p>`:''}
+      ${d(x)?`<p class="d">${esc(d(x))}</p>`:''}
+    </div></div>`).join('') : '';
+
+  const exp = rows(p.experience, x=>x.title||'—', x=>[x.company,x.employment_type].filter(Boolean).join(' · '),
+                   x=>[dr(x.dates), x.location].filter(Boolean).join('  ·  '), 'company_logo');
+  const edu = rows(p.education, x=>x.school||'—', x=>[x.degree,x.field_of_study].filter(Boolean).join(', '),
+                   x=>dr(x.dates), 'school_logo');
+
+  out.innerHTML = `
+  <div class="grid">
+    <div>
+      <div class="card">
+        <div class="who">
+          ${img(b.profile_picture)}
+          <div>
+            <p class="nm">${esc(b.full_name || b.public_identifier || '—')}</p>
+            ${b.headline?`<p class="hl">${esc(b.headline)}</p>`:''}
+            <p class="loc">${esc([b.location?.full, b.followers!=null?`${b.followers.toLocaleString()} followers`:''].filter(Boolean).join('  ·  '))}</p>
+          </div>
+        </div>
+        ${b.about?`<div class="about">${esc(b.about)}</div>`:''}
+        ${exp?`<div class="sect"><h3>Experience · ${p.experience.length}</h3>${exp}</div>`:''}
+        ${edu?`<div class="sect"><h3>Education · ${p.education.length}</h3>${edu}</div>`:''}
+        ${p.skills.length?`<div class="sect"><h3>Skills · ${p.skills.length}</h3>
+          <div class="chips">${p.skills.slice(0,18).map(s=>`<span class="chip">${esc(s.name)}</span>`).join('')}</div></div>`:''}
+        ${p.languages.length?`<div class="sect"><h3>Languages</h3>
+          <div class="chips">${p.languages.map(l=>`<span class="chip">${esc(l.name)}${l.proficiency?' · '+esc(l.proficiency):''}</span>`).join('')}</div></div>`:''}
+      </div>
+    </div>
+
+    <div>
+      <div class="card meta">
+        <h3 style="font-family:'IBM Plex Mono',monospace;font-size:10.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--dim);margin:0 0 11px;font-weight:500">Response metadata</h3>
+        <dl>
+          <dt>source</dt><dd>${esc(m.source)}</dd>
+          <dt>cached</dt><dd>${m.cached}</dd>
+          <dt>duration</dt><dd>${m.duration_ms} ms</dd>
+          <dt>identifier</dt><dd>${esc(m.public_identifier)}</dd>
+          ${m.profile_urn?`<dt>urn</dt><dd>${esc(m.profile_urn.split(':').pop())}</dd>`:''}
+        </dl>
+        <h3 style="font-family:'IBM Plex Mono',monospace;font-size:10.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--dim);margin:0 0 9px;font-weight:500">Completeness</h3>
+        <div class="cgrid">${Object.entries(m.completeness||{}).map(([k,v])=>
+          `<div><span>${esc(k)}</span><span class="${v?'yes':'no'}">${v?'✓':'·'}</span></div>`).join('')}</div>
+      </div>
+      ${r.warnings?.length?`<div class="msg warn" style="margin-top:14px">
+        <p class="code">${r.warnings.length} warning${r.warnings.length>1?'s':''}</p>
+        <p>${r.warnings.map(esc).join('<br>')}</p></div>`:''}
+    </div>
+  </div>
+  <details><summary>Raw JSON response</summary><pre>${esc(JSON.stringify(r,null,2))}</pre></details>`;
+}
+
+$('#f').onsubmit = async ev => {
+  ev.preventDefault();
+  const v = input.value.trim();
+  if(!v) return;
+
+  btn.disabled = true; btn.textContent = 'Fetching…';
+  setLanes('trying','…'); note.textContent = 'requesting';
+  out.innerHTML = '';
+  const t0 = performance.now();
+
+  try{
+    const headers = {'Accept':'application/json'};
+    const key = keyInput.value.trim();
+    if (key) headers['X-API-Key'] = key;
+
+    const res = await fetch(`/api/v1/profile?url=${encodeURIComponent(v)}`, {headers});
+    const body = await res.json();
+    if (res.ok) { renderProfile(body); return; }
+
+    // The server requires a key: reveal the field rather than leaving a dead end.
+    if (res.status === 401) { keyRow.classList.remove('hidden'); keyInput.focus(); }
+    renderError(body, res.status);
+  }catch(err){
+    setLanes('idle'); note.textContent = 'unreachable';
+    out.innerHTML = `<div class="msg bad"><p class="code">NETWORK</p>
+      <h3>Could not reach the API</h3>
+      <p>${esc(err.message)}</p>
+      <div class="fix">Is the server running? <pre>uvicorn app.main:app --reload</pre></div></div>`;
+  }finally{
+    btn.disabled = false; btn.textContent = 'Fetch profile';
+    if(note.textContent==='requesting') note.textContent = `${Math.round(performance.now()-t0)}ms`;
+  }
+};
+</script>
+</body>
+</html>

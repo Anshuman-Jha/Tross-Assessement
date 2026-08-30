@@ -55,6 +55,7 @@ class Settings(BaseSettings):
 
     # ------------------------------------------------------------- behaviour
     # Which acquisition tiers are permitted, in preference order.
+    enable_dash_tier: bool = True
     enable_graphql_tier: bool = True
     enable_rest_tier: bool = True
     enable_html_tier: bool = True
