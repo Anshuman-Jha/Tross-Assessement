@@ -9,8 +9,7 @@ HTTP. There is no browser, no headless Chrome, no Playwright/Selenium/Puppeteer
 and no JavaScript execution anywhere in the stack.
 
 ```bash
-curl -H "X-API-Key: $KEY" \
-  "https://<your-deployment>/api/v1/profile?url=https://www.linkedin.com/in/williamhgates/"
+curl "https://<your-deployment>/api/v1/profile?url=https://www.linkedin.com/in/williamhgates/"
 ```
 
 ---
@@ -122,12 +121,22 @@ Every endpoint is also documented interactively at `/docs` (OpenAPI 3.1).
 
 ### Authentication
 
-Send your key in the `X-API-Key` header. Configure keys via `API_KEYS`
-(comma-separated). For local development set `REQUIRE_API_KEY=false`.
+**The hosted demo is deliberately open** so it can be tried without a
+credential exchange. It is still throttled per client IP.
+
+API-key auth is implemented and is what a real deployment of this should use,
+because the service holds live LinkedIn session cookies — an unauthenticated
+endpoint is an open proxy onto somebody's LinkedIn account. To turn it on:
 
 ```bash
-python -c "import secrets; print(secrets.token_urlsafe(32))"   # generate one
+REQUIRE_API_KEY=true
+API_KEYS=$(python -c "import secrets; print(secrets.token_urlsafe(32))")
 ```
+
+Callers then send `X-API-Key: <key>`; `API_KEYS` accepts a comma-separated list
+so keys can be rotated without downtime. Comparison is constant-time
+([`app/api/deps.py`](app/api/deps.py)). `/healthz`, `/readyz` and `/docs` stay
+public either way so a deployment can always be inspected.
 
 ### `GET /api/v1/profile`
 
@@ -138,8 +147,7 @@ python -c "import secrets; print(secrets.token_urlsafe(32))"   # generate one
 | `refresh` | boolean | `false` | Bypass the cache and re-fetch |
 
 ```bash
-curl -H "X-API-Key: $KEY" \
-  "http://localhost:8000/api/v1/profile?url=https://www.linkedin.com/in/williamhgates/"
+curl "http://localhost:8000/api/v1/profile?url=https://www.linkedin.com/in/williamhgates/"
 ```
 
 Any URL shape works — they all normalise to the same profile and the same cache
@@ -155,7 +163,7 @@ williamhgates
 ### `POST /api/v1/profile`
 
 ```bash
-curl -X POST -H "X-API-Key: $KEY" -H "Content-Type: application/json" \
+curl -X POST -H "Content-Type: application/json" \
   -d '{"url":"https://www.linkedin.com/in/williamhgates/"}' \
   http://localhost:8000/api/v1/profile
 ```
@@ -163,7 +171,7 @@ curl -X POST -H "X-API-Key: $KEY" -H "Content-Type: application/json" \
 ### `GET /api/v1/profile/{public_id}`
 
 ```bash
-curl -H "X-API-Key: $KEY" http://localhost:8000/api/v1/profile/williamhgates
+curl http://localhost:8000/api/v1/profile/williamhgates
 ```
 
 ### Operational endpoints
@@ -309,8 +317,7 @@ a CRM import or a dataframe.
 [pb]: https://phantombuster.com/automations/linkedin/5589386912058181/linkedin-profile-scraper
 
 ```bash
-curl -H "X-API-Key: $KEY" \
-  "http://localhost:8000/api/v1/profile?url=williamhgates&format=flat"
+curl "http://localhost:8000/api/v1/profile?url=williamhgates&format=flat"
 ```
 
 ```jsonc
@@ -623,15 +630,14 @@ app/
 
 1. Push this repo to GitHub.
 2. Render → **New → Blueprint** → select the repo. It reads `render.yaml`.
-3. Set the secrets when prompted — they are marked `sync: false` so they are
-   **never** stored in the repo:
-   - `LINKEDIN_LI_AT`
-   - `API_KEYS`
+3. Set `LINKEDIN_LI_AT` when prompted. It is marked `sync: false`, so the
+   blueprint names the secret without ever containing it — Render asks for the
+   value and keeps it in its own encrypted store, never in the repo. Leave
+   `LINKEDIN_JSESSIONID` blank; the client negotiates a matched one itself.
 4. Deploy. HTTPS and a subdomain are automatic.
 
 ```bash
-curl -H "X-API-Key: $KEY" \
-  "https://<your-service>.onrender.com/api/v1/profile?url=williamhgates"
+curl "https://<your-service>.onrender.com/api/v1/profile?url=williamhgates"
 ```
 
 > Render's free tier sleeps after inactivity, so the first request after a
@@ -641,7 +647,7 @@ curl -H "X-API-Key: $KEY" \
 
 ```bash
 docker build -t linkedin-profile-api .
-docker run -p 8000:8000 -e LINKEDIN_LI_AT=… -e API_KEYS=… linkedin-profile-api
+docker run -p 8000:8000 -e LINKEDIN_LI_AT=… -e REQUIRE_API_KEY=false linkedin-profile-api
 ```
 
 The image runs as an unprivileged user, carries no build toolchain, and honours
@@ -654,8 +660,8 @@ Full list in [`.env.example`](.env.example). The ones that matter:
 | Variable | Default | Purpose |
 |---|---|---|
 | `LINKEDIN_LI_AT` | — | **Required.** Session cookie. |
-| `API_KEYS` | — | Comma-separated keys for `X-API-Key`. |
-| `REQUIRE_API_KEY` | `true` | Set `false` for local development. |
+| `REQUIRE_API_KEY` | `true` | Secure by default. The hosted demo sets `false`. |
+| `API_KEYS` | — | Comma-separated keys for `X-API-Key`, used when the above is `true`. |
 | `REDIS_URL` | — | Shared cache; falls back to in-process. |
 | `CACHE_TTL_SECONDS` | `3600` | Higher means less upstream load. |
 | `REQUESTS_PER_MINUTE_PER_SESSION` | `30` | Per-session budget. |

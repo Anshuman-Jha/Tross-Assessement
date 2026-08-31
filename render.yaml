@@ -19,8 +19,6 @@ services:
         sync: false
       - key: LINKEDIN_JSESSIONID
         sync: false
-      - key: API_KEYS
-        sync: false
 
       # --- non-secret configuration ----------------------------------------
       - key: ENVIRONMENT
@@ -29,8 +27,13 @@ services:
         value: INFO
       - key: LOG_JSON
         value: "true"
+      # This deployment is a public demo for review, so the endpoints are open
+      # and throttled by client IP instead. The `X-API-Key` layer is fully
+      # implemented (app/api/deps.py) and is what a real deployment should use,
+      # since the service holds live LinkedIn credentials: set REQUIRE_API_KEY
+      # to "true" and add an API_KEYS secret to turn it on.
       - key: REQUIRE_API_KEY
-        value: "true"
+        value: "false"
 
       # Free instances sleep and share egress IPs, so pace conservatively.
       - key: MAX_CONCURRENT_UPSTREAM

@@ -33,7 +33,7 @@ class FailingFetcher:
         self._error = error
         self.calls = 0
 
-    async def fetch(self, public_id: str):  # noqa: ANN201
+    async def fetch(self, public_id: str):
         self.calls += 1
         raise self._error
 
